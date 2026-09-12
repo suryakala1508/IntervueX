@@ -1,0 +1,57 @@
+# Local full stack: PostgreSQL with pgvector, the API, and the built frontend.
+#
+#   docker compose up --build
+#   open http://localhost:5173
+#
+# The API alone is enough for development; `npm run dev` proxies to it.
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: intervuex
+      POSTGRES_PASSWORD: intervuex
+      POSTGRES_DB: intervuex
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # The API's create_all runs at startup, so it must not start first.
+      test: ['CMD-SHELL', 'pg_isready -U intervuex -d intervuex']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://intervuex:intervuex@db:5432/intervuex
+      ENVIRONMENT: development
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-change-me}
+      CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+      VECTOR_BACKEND: pgvector
+      # Unset means the deterministic offline provider: the app works fully,
+      # with rule-based questions and grading instead of model-generated ones.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+    ports:
+      - '8000:8000'
+
+  web:
+    build:
+      context: ./frontend
+      args:
+        # Same-origin in this setup: nginx serves the app, the browser calls
+        # the API directly at localhost:8000 via CORS.
+        VITE_API_BASE_URL: http://localhost:8000
+    depends_on:
+      - api
+    ports:
+      - '5173:80'
+
+volumes:
+  pgdata:
